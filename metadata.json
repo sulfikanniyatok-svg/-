@@ -1,0 +1,6 @@
+{
+  "name": "Yala Smart Municipality Platform",
+  "description": "เว็บไซต์ต้นแบบบริการดิจิทัลระบบเมืองอัจฉริยะ เทศบาลนครยะลา สำหรับการใช้งานของประชาชน แจ้งปัญหา คัดกรองด้วย AI แดชบอร์ดข้อมูลเมืองอัจฉริยะ และข้อมูลเปิดสาธารณะ",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
