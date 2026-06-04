@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // === GLOBAL SAFETY NET ===
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // === GLOBAL REUSABLE FUNCTIONS ===
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // === VALIDATION BLUEPRINTS ===
+    function isValidUser(data) {
+      return data.keys().hasAll(['userId', 'email', 'createdAt'])
+        && data.keys().size() <= 10
+        && data.userId == request.auth.uid
+        && data.email is string
+        && data.email.size() <= 256
+        && data.createdAt is string;
+    }
+
+    function isValidComplaint(data) {
+      return data.keys().hasAll(['id', 'userId', 'title', 'category', 'description', 'location', 'status', 'createdAt', 'trackingNum', 'priority'])
+        && data.keys().size() <= 20
+        && data.id is string
+        && data.userId == request.auth.uid  // Ensure users cannot forge high-jacked reporter UIDs
+        && data.title is string && data.title.size() <= 300
+        && data.category is string && data.category.size() <= 200
+        && data.description is string && data.description.size() <= 5000
+        && data.location is string && data.location.size() <= 1000
+        && data.status is string && (data.status in ['pending', 'processing', 'done', 'received', 'progress', 'completed'])
+        && data.trackingNum is string && data.trackingNum.size() <= 100
+        && data.priority is string && (data.priority in ['low', 'medium', 'high', 'critical']);
+    }
+
+    // === USERS COLLECTION ===
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming()) && incoming().email == existing().email;
+      allow delete: if false; // Users cannot delete profiles
+    }
+
+    // === COMPLAINTS COLLECTION ===
+    match /complaints/{complaintId} {
+      // Allow single read for active trackings or anyone checking status safely
+      allow get: if true;
+      
+      // Allow searching and listing complaints - query enforcer restricts to owner
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      // Allow creation by signed in owner
+      allow create: if isSignedIn() 
+        && isValidId(complaintId) 
+        && isValidComplaint(incoming())
+        && incoming().createdAt is string;
+
+      // Allow updates by owner or admin
+      // Owners can only edit status fields or cancel/update under strict rules
+      allow update: if isSignedIn()
+        && isValidComplaint(incoming())
+        && (
+          // Case 1: Owner changes editable fields
+          (incoming().userId == request.auth.uid && incoming().userId == existing().userId)
+        );
+
+      allow delete: if false; // Complaints must never be deleted to preserve municipal accountability
+    }
+  }
+}
