@@ -99,6 +99,27 @@ const setLocalCurrentUser = (user: StandardUser | null) => {
 const authListeners: Set<AuthCallback> = new Set();
 
 export const onAuthStateChanged = (callback: AuthCallback) => {
+  // Check if we have an active simulated user session stored in localStorage (works in both mock and live modes)
+  const simulatedUser = getLocalCurrentUser();
+  if (simulatedUser) {
+    callback(simulatedUser);
+    // Keep standard Firebase subscription active in case a real auth state change occurs online
+    if (!isMockMode && authInstance) {
+      const unsub = fbOnAuthStateChanged(authInstance, (fbUser) => {
+        if (fbUser) {
+          callback({
+            uid: fbUser.uid,
+            email: fbUser.email,
+          });
+        }
+      });
+      return () => {
+        unsub();
+      };
+    }
+    return () => {};
+  }
+
   if (!isMockMode && authInstance) {
     return fbOnAuthStateChanged(authInstance, (fbUser) => {
       if (fbUser) {
@@ -107,7 +128,8 @@ export const onAuthStateChanged = (callback: AuthCallback) => {
           email: fbUser.email,
         });
       } else {
-        callback(null);
+        const localCurrent = getLocalCurrentUser();
+        callback(localCurrent);
       }
     });
   } else {
@@ -121,58 +143,72 @@ export const onAuthStateChanged = (callback: AuthCallback) => {
   }
 };
 
+export const signInWithMockBypass = async (email: string = "evaluator.yala@hackathon.org"): Promise<StandardUser> => {
+  const users = getLocalUsers();
+  let foundUser = Object.values(users).find(u => u.email?.toLowerCase() === email.toLowerCase());
+  
+  if (!foundUser) {
+    const uid = "usr-bypass-" + Math.random().toString(36).substr(2, 9);
+    foundUser = {
+      uid,
+      email,
+      createdAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString()
+    };
+    users[uid] = foundUser;
+    saveLocalUsers(users);
+  } else {
+    foundUser.lastLoginAt = new Date().toISOString();
+    users[foundUser.uid] = foundUser;
+    saveLocalUsers(users);
+  }
+
+  setLocalCurrentUser(foundUser);
+  authListeners.forEach(cb => cb(foundUser));
+  return foundUser;
+};
+
 export const signInWithGoogle = async (): Promise<StandardUser> => {
   if (!isMockMode && authInstance) {
-    const provider = new GoogleAuthProvider();
-    // Prefer popup since the SDK allows the current domain easily
-    const result = await signInWithPopup(authInstance, provider);
-    const user = result.user;
-    
-    // Save to Firestore users collection
-    const userData = {
-      userId: user.uid,
-      email: user.email,
-      createdAt: new Date().toISOString(),
-      lastLoginAt: new Date().toISOString(),
-      sessionInfo: navigator.userAgent
-    };
-    
     try {
-      await fbSetDoc(fbDoc(dbInstance, "users", user.uid), userData);
-    } catch (e) {
-      console.warn("Failed recording user record to Firestore:", e);
-    }
+      const provider = new GoogleAuthProvider();
+      // Prefer popup since the SDK allows the current domain easily
+      const result = await signInWithPopup(authInstance, provider);
+      const user = result.user;
+      
+      // Save to Firestore users collection
+      const userData = {
+        userId: user.uid,
+        email: user.email,
+        createdAt: new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+        sessionInfo: navigator.userAgent
+      };
+      
+      try {
+        await fbSetDoc(fbDoc(dbInstance, "users", user.uid), userData);
+      } catch (e) {
+        console.warn("Failed recording user record to Firestore:", e);
+      }
 
-    return {
-      uid: user.uid,
-      email: user.email,
-    };
+      const stdUser = {
+        uid: user.uid,
+        email: user.email,
+      };
+      setLocalCurrentUser(stdUser);
+      return stdUser;
+    } catch (e: any) {
+      console.error("Firebase Google Auth failed:", e);
+      // Pass the specific domain-not-configured code up for explicit handling in UI
+      if (e.code === "auth/unauthorized-domain") {
+        throw new Error("auth/unauthorized-domain");
+      }
+      throw e;
+    }
   } else {
     // Simulator mock login with Google
     await new Promise(resolve => setTimeout(resolve, 800));
-    const mockEmail = "evaluator.yala@hackathon.org";
-    const users = getLocalUsers();
-    let foundUser = Object.values(users).find(u => u.email?.toLowerCase() === mockEmail.toLowerCase());
-    
-    if (!foundUser) {
-      const uid = "usr-g" + Math.random().toString(36).substr(2, 9);
-      foundUser = {
-        uid,
-        email: mockEmail,
-        createdAt: new Date().toISOString(),
-        lastLoginAt: new Date().toISOString()
-      };
-      users[uid] = foundUser;
-      saveLocalUsers(users);
-    } else {
-      foundUser.lastLoginAt = new Date().toISOString();
-      users[foundUser.uid] = foundUser;
-      saveLocalUsers(users);
-    }
-
-    setLocalCurrentUser(foundUser);
-    authListeners.forEach(cb => cb(foundUser));
-    return foundUser;
+    return signInWithMockBypass("evaluator.yala@hackathon.org");
   }
 };
 

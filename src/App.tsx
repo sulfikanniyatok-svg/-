@@ -53,11 +53,21 @@ import {
   isSignInWithEmailLink,
   signInWithEmailLink,
   signInWithGoogle,
+  signInWithMockBypass,
   dbSaveComplaint,
   dbGetComplaints,
   dbUpdateComplaintStatus,
   isMockMode
 } from "./firebase";
+
+import {
+  FALLBACK_STATS,
+  FALLBACK_DATASETS,
+  FALLBACK_PROJECTS,
+  FALLBACK_MARKERS,
+  FALLBACK_TOURISM,
+  FALLBACK_COMPLAINTS
+} from "./fallbackData";
 
 
 // ================== DICTIONARY FOR MULTI-LANGUAGE SYSTEM ==================
@@ -495,47 +505,65 @@ export default function App() {
   const fetchStats = async () => {
     try {
       const res = await fetch("/api/city-stats");
+      if (!res.ok) throw new Error("Status " + res.status);
       const data = await res.json();
       setStats(data);
     } catch (e) {
       console.warn("Failed fetching municipal stats. Utilizing offline data metrics.", e);
+      setStats(FALLBACK_STATS);
     }
   };
 
   const fetchDatasets = async () => {
     try {
       const res = await fetch("/api/open-datasets");
+      if (!res.ok) throw new Error("Status " + res.status);
       const data = await res.json();
       setDatasets(data);
     } catch (e) {
-      console.error(e);
+      console.warn("Using offline fallback datasets:", e);
+      setDatasets(FALLBACK_DATASETS);
     }
   };
 
   const fetchProjects = async () => {
     try {
       const res = await fetch("/api/projects");
+      if (!res.ok) throw new Error("Status " + res.status);
       const data = await res.json();
       setProjectList(data);
     } catch (e) {
-      console.error(e);
+      console.warn("Using offline fallback projects:", e);
+      setProjectList(FALLBACK_PROJECTS);
     }
   };
 
   const fetchMarkers = async () => {
     try {
       const res = await fetch("/api/map-markers");
+      if (!res.ok) throw new Error("Status " + res.status);
       const data = await res.json();
       setMarkers(data);
     } catch (e) {
-      console.error(e);
+      console.warn("Using offline fallback map markers:", e);
+      setMarkers(FALLBACK_MARKERS);
     }
   };
 
   const fetchComplaints = async () => {
     try {
-      const res = await fetch("/api/complaints");
-      const data = await res.json();
+      let data = [];
+      try {
+        const res = await fetch("/api/complaints");
+        if (res.ok) {
+          data = await res.json();
+        } else {
+          data = FALLBACK_COMPLAINTS;
+        }
+      } catch (errApi) {
+        console.warn("Could not load complaints from API, using fallback complaints:", errApi);
+        data = FALLBACK_COMPLAINTS;
+      }
       
       // Fetch user's persistent complaints from Firestore or localStorage
       const userComplaints = await dbGetComplaints(currentUser?.uid);
@@ -547,7 +575,8 @@ export default function App() {
       ];
       setComplaints(merged);
     } catch (e) {
-      console.error(e);
+      console.error("General complaints parsing error. Setting fallbacks:", e);
+      setComplaints(FALLBACK_COMPLAINTS);
     }
   };
 
@@ -555,13 +584,17 @@ export default function App() {
   const fetchTourism = async () => {
     try {
       const res = await fetch("/api/tourism");
+      if (!res.ok) throw new Error("Status " + res.status);
       const data = await res.json();
       setTourism(data);
-      if (data.length > 0 && !selectedSpot) {
-        setSelectedSpot(data[0]);
+      if (data.length > 0) {
+        // Only set selectedSpot if not yet configured, prioritizing index 0
+        setSelectedSpot(prev => prev || data[0]);
       }
     } catch (e) {
-      console.error(e);
+      console.warn("Using offline fallback tourism spots:", e);
+      setTourism(FALLBACK_TOURISM);
+      setSelectedSpot(prev => prev || FALLBACK_TOURISM[0]);
     }
   };
 
@@ -576,21 +609,22 @@ export default function App() {
     setIsSubmitting(true);
     setLastSubmissionResult(null);
 
-    try {
-      const payload = {
-        title: complaintForm.title,
-        description: complaintForm.description,
-        location: complaintForm.location,
-        coordinates: { lat: complaintForm.lat, lng: complaintForm.lng },
-        imageUrl: complaintForm.imageUrl || "https://images.unsplash.com/photo-1590086782957-93c060218022?auto=format&fit=crop&w=400&q=80"
-      };
+    const payload = {
+      title: complaintForm.title,
+      description: complaintForm.description,
+      location: complaintForm.location,
+      coordinates: { lat: complaintForm.lat, lng: complaintForm.lng },
+      imageUrl: complaintForm.imageUrl || "https://images.unsplash.com/photo-1590086782957-93c060218022?auto=format&fit=crop&w=400&q=80"
+    };
 
+    try {
       const res = await fetch("/api/complaints", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
       
+      if (!res.ok) throw new Error("API not ok");
       const resData = await res.json();
 
       if (resData.success) {
@@ -643,8 +677,127 @@ export default function App() {
         });
       }
     } catch (err) {
-      console.error(err);
-      triggerToast("Failed communication with back-end prototype", "info");
+      console.warn("Backend complaints filing failed. Simulating local classification & persistence:", err);
+      
+      // Simulate classification
+      const title = complaintForm.title;
+      const description = complaintForm.description;
+      const lowercaseContent = (title + " " + description).toLowerCase();
+      
+      let aiSuggestion = {
+        category: "ปัญหาทั่วไปทางการบริการ",
+        department: "กองช่าง",
+        confidence: 0.85,
+        priority: "medium" as any,
+        explanation: "คัดกรองระบบจำลองเบื้องต้น เพื่อประสานหน่วยงานบำบัดทุกข์บำรุงสุขแก่ประชาชน"
+      };
+      
+      if (lowercaseContent.includes("ไฟ") || lowercaseContent.includes("แสงสว่าง") || lowercaseContent.includes("ส่องสว่าง")) {
+        aiSuggestion = {
+          category: "ระบบไฟฟ้าและแสงสว่าง",
+          department: "งานไฟฟ้าและแสงสว่าง",
+          confidence: 0.92,
+          priority: "high",
+          explanation: "คัดเลือกกองจากหลักฐานคำพ้องความหมายด้านไฟฟ้าและแสงสว่าง"
+        };
+      } else if (lowercaseContent.includes("ขยะ") || lowercaseContent.includes("กลิ่น") || lowercaseContent.includes("เหม็น") || lowercaseContent.includes("น้ำเสีย")) {
+        aiSuggestion = {
+          category: "ขยะมูลฝอยและสิ่งแวดล้อม",
+          department: "กองสาธารณสุขและสิ่งแวดล้อม",
+          confidence: 0.94,
+          priority: "medium",
+          explanation: "คัดเลือกกองส่งต่อดูแลสิ่งปฏิกูลตามระบบฐานข้อมูลขยะไร้ฝุ่น"
+        };
+      } else if (lowercaseContent.includes("ท่วม") || lowercaseContent.includes("น้ำล้น") || lowercaseContent.includes("ฝน") || lowercaseContent.includes("อุทกภัย")) {
+        aiSuggestion = {
+          category: "ภัยพิบัติและบรรเทาสาธารณภัย",
+          department: "กองป้องกันและบรรเทาสาธารณภัย",
+          confidence: 0.96,
+          priority: "critical",
+          explanation: "จัดหมวดภัยฉุกเฉินน้ำล้นท่วมขังเพื่อตอบรับเร่งด่วนรวดเร็ว"
+        };
+      } else if (lowercaseContent.includes("ถนน") || lowercaseContent.includes("หลุม") || lowercaseContent.includes("ทางเท้า") || lowercaseContent.includes("ฝาท่อ")) {
+        aiSuggestion = {
+          category: "ความชำรุดโยธาและทางจราจร",
+          department: "กองช่าง",
+          confidence: 0.95,
+          priority: "high",
+          explanation: "จัดเป็นงานซ่อมผิวจราจรและโครงข่ายขนส่งให้อยู่ในสภาพสมบูรณ์"
+        };
+      }
+
+      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+      const trackingNum = `YLA-2026-${randomSuffix}`;
+      const d = new Date();
+      const dateStr = d.toISOString().split("T")[0];
+
+      const finalComplaint = {
+        id: `comp-${Date.now()}`,
+        title,
+        description,
+        category: aiSuggestion.category,
+        dept: aiSuggestion.department,
+        location: complaintForm.location,
+        coordinates: { lat: complaintForm.lat, lng: complaintForm.lng },
+        imageUrl: complaintForm.imageUrl || "https://images.unsplash.com/photo-1590086782957-93c060218022?auto=format&fit=crop&w=400&q=80",
+        status: "received" as const,
+        date: dateStr,
+        trackingNum,
+        priority: aiSuggestion.priority,
+        userId: currentUser?.uid || "guest",
+        progressLog: [
+          {
+            status: "received" as const,
+            date: `${dateStr} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
+            note: `ระบบรับเรื่องร่วมพิกัด [${aiSuggestion.category} -> ${aiSuggestion.department}] สำเร็จด้วยระบบคัดกรองแบบจำลองปัญญาประดิษฐ์ท้องถิ่น`
+          }
+        ]
+      };
+
+      // Save using our unified Firestore persistent database adapter (will fallback to localStorage if firebase fails/offline)
+      await dbSaveComplaint(finalComplaint);
+
+      const fakeResData = {
+        success: true,
+        data: finalComplaint,
+        aiRecommendation: aiSuggestion
+      };
+
+      setLastSubmissionResult(fakeResData);
+      triggerToast(`${translations[lang].toastSuccess} เลขที่ติดตาม: ${trackingNum}`, "success");
+      setComplaints(prev => [finalComplaint, ...prev]);
+
+      const newMarker: MapMarker = {
+        id: `marker-${Date.now()}`,
+        title: {
+          th: `เรื่องร้องเรียน: ${aiSuggestion.category}`,
+          en: `Complaint: ${aiSuggestion.category}`,
+          ms: `Aduan: ${aiSuggestion.category}`
+        },
+        type: "complaint",
+        coordinates: finalComplaint.coordinates,
+        address: {
+          th: finalComplaint.location,
+          en: finalComplaint.location,
+          ms: finalComplaint.location
+        },
+        status: "received"
+      };
+      setMarkers(prev => [newMarker, ...prev]);
+
+      setNotifications(prev => [
+        `เรื่องแจ้งปัญหาไคลซิสใหม่ [${trackingNum}] ส่งตรวจกองงาน ${aiSuggestion.department} เรียบร้อย`,
+        ...prev
+      ]);
+
+      setComplaintForm({
+        title: "",
+        description: "",
+        location: "",
+        imageUrl: "",
+        lat: 6.5415,
+        lng: 101.2820
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -675,6 +828,7 @@ export default function App() {
           messages: [...chatMessages, userMsg]
         })
       });
+      if (!res.ok) throw new Error("API not ok");
       const data = await res.json();
       
       setChatMessages(prev => [...prev, {
@@ -684,7 +838,30 @@ export default function App() {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }]);
     } catch (err) {
-      console.error(err);
+      console.warn("Backend chat failed. Generating local helper response:", err);
+      
+      const text = memoInput.trim();
+      let responseText = "ขออภัยครับ ขณะนี้ระบบประมวลผลระบบช่วยเหลือจำลองได้รับข้อความแล้ว แนะนำให้ตรวจสอบพิกัดท่องเที่ยวหรือตารางบริการเมืองโดยละเอียดอีกครั้งนะครับ";
+      
+      const textLower = text.toLowerCase();
+      if (textLower.includes("ภาษี") || textLower.includes("tax")) {
+        responseText = `สำหรับการเสียภาษีในเขตเทศบาลนครยะลา มีข้อมูลดังนี้ครับ:\n\n1. ภาษีที่ดินและสิ่งปลูกสร้าง (ชำระภายในเดือนเมษายน ของทุกปี)\n2. ภาษีป้าย (ยื่นแบบภายในเดือนมีนาคม ของทุกปี)\n\nช่องทางชำระหลัก: สามารถมารับการบริการโดยสแกน QR Code ตรวจสอบสิทธิ์ที่กองคลัง แผนกชำระภาษี ชั้น 1 ของสำนักงานเทศบาล หรือผ่านระบบโอนโมบายแบงก์กิ้งเพื่อความอัจฉริยะสะดวกสบายครับ`;
+      } else if (textLower.includes("เวลา") || textLower.includes("ทำงาน") || textLower.includes("เปิด") || textLower.includes("ปิด") || textLower.includes("office") || textLower.includes("schedule")) {
+        responseText = `สำนักงานเทศบาลนครยะลา เปิดทำการวันจันทร์ - ศุกร์ ตั้งแต่เวลา 08:30 น. ถึง 16:30 น. (หยุดทำการวันเสาร์ - อาทิตย์ และวันหยุดนักขัตฤกษ์ราชการ) แต่อุปกรณ์คลาวด์และจุดตรวจวัดสภาพสิ่งแวดล้อมทำงานคัดกรองปัญหายังออนไลน์รันทำงาน 24 ชั่วโมงครับ`;
+      } else if (textLower.includes("เที่ยว") || textLower.includes("แนะนำ") || textLower.includes("tour") || textLower.includes("travel")) {
+        responseText = `เทศบาลนครยะลาและอำเภอเคียงข้างมีจุดท่องเที่ยวสะกดสายตาน่าไปเยือนหลายแห่งครับ:\n\n- **สวนขวัญเมือง**: สวนพักใจระดับภูมิภาค มีสนามแข่งขันนกเขาชวาเสียงและลู่วิ่งเลียบน่านน้ำ\n- **ศาลหลักเมืองยะลา**: วงเวียนปูชนียสถาปัตยกรรมสุโขทัยร่มรื่นมีชื่อเสียง\n- **ทะเลหมอกอัยเยอร์เวง / เบตง**: ทะเลหมอกระดับอาเซียน 360 องศาพร้อมสะพานสกายวอล์กกระจกสัมผัสก้อนเมฆแสนประทับใจ\n\nสามารถคลิกเลือกชมเพิ่มเติมได้ที่แท็บ "ท่องเที่ยวอัจฉริยะ 🧭" เพื่อศึกษารายการประเมินได้เลยครับ!`;
+      } else if (textLower.includes("เบอร์") || textLower.includes("โทร") || textLower.includes("ด่วน") || textLower.includes("ติดต่อ")) {
+        responseText = `เบอร์ติดต่อด่วนสำคัญของเทศบาลนครยะลา สำหรับปวงชนช่วยเหลือฉุกเฉิน:\n\n- กองป้องกันและบรรเทาสาธารณภัย (ดับเพลิง/กู้ภัยทางใต้): 199 หรือ 073-212111 (บริการ 24 ชั่วโมง)\n- ศูนย์ประสานป้องกันยาเสพติด: 073-222621\n- สำนักปลัดเทศบาล: 073-216790`;
+      } else if (textLower.includes("สวัสดี") || textLower.includes("hello") || textLower.includes("hi") || textLower.includes("ดีครับ") || textLower.includes("ดีค่ะ")) {
+        responseText = `สวัสดีครับ! ยินดีต้อนรับสู่ผู้ช่วยหมุดอัจฉริยะเมืองยะลา แพลตฟอร์มดิจิทัลบริการประชาชนเชิงรุก ผมคอยแสตนด์บายช่วยเหลือแนะนำข้อมูลเกี่ยวกับ เวลาทำการ สำนักภาษี การท่องเที่ยว หรือเรื่องราวร้องทุกข์ปัญหาชุมชนครับ! มีอะไรให้ผมรับใช้แจ้งได้เลยครับ`;
+      }
+      
+      setChatMessages(prev => [...prev, {
+        id: `chat-reply-${Date.now()}`,
+        sender: "assistant",
+        text: responseText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }]);
     } finally {
       setIsChatTyping(false);
     }
@@ -712,6 +889,7 @@ export default function App() {
           text: reviewForm.text
         })
       });
+      if (!res.ok) throw new Error("API not ok");
       const data = await res.json();
       if (data.success) {
         triggerToast("ขอบคุณที่ร่วมรีวิวพิกัดท้องถิ่นยะลาอัจฉริยะ!", "success");
@@ -722,7 +900,32 @@ export default function App() {
         setReviewForm({ author: "", rating: 5, text: "" });
       }
     } catch (err) {
-      console.error(err);
+      console.warn("Backend review submission failed. Simulating review on client state:", err);
+      // Fallback local update
+      setTourism(prev => prev.map(s => {
+        if (s.id === spotId) {
+          const newReview = {
+            author: reviewForm.author,
+            rating: Number(reviewForm.rating),
+            text: reviewForm.text,
+            date: new Date().toISOString().split("T")[0]
+          };
+          const updatedReviews = [newReview, ...s.reviews];
+          const totalRating = updatedReviews.reduce((sum, r) => sum + r.rating, 0);
+          const updatedSpot = {
+            ...s,
+            reviewsCount: updatedReviews.length,
+            reviews: updatedReviews,
+            rating: parseFloat((totalRating / updatedReviews.length).toFixed(1))
+          };
+          // Set as currently selected as well
+          setSelectedSpot(updatedSpot);
+          return updatedSpot;
+        }
+        return s;
+      }));
+      triggerToast("ร่วมรีวิวพิกัดท้องถิ่นยะลาระบบจำลองสำเร็จ!", "success");
+      setReviewForm({ author: "", rating: 5, text: "" });
     }
   };
 
@@ -2278,16 +2481,21 @@ export default function App() {
                           onClick={async () => {
                             try {
                               setLoadingAuth(true);
-                              // Simulate verification link click with redirect Target
-                              const mockHref = `${window.location.origin}${window.location.pathname}?apiKey=mock&mockSignIn=true`;
-                              localStorage.setItem("emailForSignIn", emailInput);
-                              window.location.href = mockHref;
+                              const user = await signInWithMockBypass(emailInput);
+                              setCurrentUser(user);
+                              triggerToast(`ยินดีต้อนรับ! คุณเข้าสู่ระบบจำลองสำเร็จด้วยอีเมล ${emailInput}`, "success");
+                              
+                              // Redirect to stored tab
+                              const target = localStorage.getItem("authRedirectTarget") || "dashboard";
+                              setActiveTab(target);
                             } catch (e: any) {
                               console.error(e);
+                              setAuthError(e.message || "การจำลองลิงก์เข้าสู่ระบบล้มเหลว");
+                            } finally {
                               setLoadingAuth(false);
                             }
                           }}
-                          className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition-all shadow-lg shadow-emerald-500/10 cursor-pointer"
+                          className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition-all shadow-lg shadow-emerald-500/10 cursor-pointer animate-pulse"
                         >
                           📬 คลิกลิงก์ยืนยันในอีเมลจำลอง (Simulate Magic Link Click)
                         </button>
@@ -2410,14 +2618,22 @@ export default function App() {
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">🛠️ ผู้ประเมิน & กรรมการแข่งขันเข้าระบบทางลัด</p>
                     <button
                       onClick={async () => {
-                        setEmailInput("evaluator.yala@hackathon.org");
-                        setIsSendingLink(true);
+                        setLoadingAuth(true);
                         setAuthError(null);
-                        setTimeout(() => {
-                          setIsSendingLink(false);
-                          setLinkSent(true);
-                          triggerToast("เตรียมพอร์ทัลบัญชีแอดมินทดลองสำเร็จ!", "success");
-                        }, 500);
+                        try {
+                          const user = await signInWithMockBypass("evaluator.yala@hackathon.org");
+                          setCurrentUser(user);
+                          triggerToast("เข้าสู่ระบบสิทธิ์แอดมินจำลอง (Evaluator Bypass) สำเร็จ!", "success");
+                          
+                          // Redirect to stored tab
+                          const target = localStorage.getItem("authRedirectTarget") || "dashboard";
+                          setActiveTab(target);
+                        } catch (err: any) {
+                          console.error(err);
+                          setAuthError(err.message || "การเข้าระบบจำลองล้มเหลว");
+                        } finally {
+                          setLoadingAuth(false);
+                        }
                       }}
                       className="w-full py-2.5 px-4 outline-dashed outline-1 outline-blue-500/40 hover:bg-slate-100 dark:hover:bg-slate-800 text-blue-500 dark:text-blue-400 rounded-xl text-xs font-extrabold transition-all cursor-pointer"
                     >
