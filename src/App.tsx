@@ -52,6 +52,7 @@ import {
   sendSignInLinkToEmail,
   isSignInWithEmailLink,
   signInWithEmailLink,
+  signInWithGoogle,
   dbSaveComplaint,
   dbGetComplaints,
   dbUpdateComplaintStatus,
@@ -2299,53 +2300,110 @@ export default function App() {
                       </div>
                     </div>
                   ) : (
-                    <form onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (!emailInput.trim()) {
-                        triggerToast("กรุณากรอกอีเมลที่ถูกต้อง", "info");
-                        return;
-                      }
-                      setIsSendingLink(true);
-                      setAuthError(null);
-                      try {
-                        await sendSignInLinkToEmail(emailInput);
-                        setLinkSent(true);
-                        triggerToast("ส่งจดหมายตรวจสอบล็อกอินสำเร็จ! กรุณาเช็กอีเมล", "success");
-                      } catch (err: any) {
-                        console.error(err);
-                        setAuthError(err.message || "การส่งลิงก์ขัดข้อง โปรดตรวจสอบอินเทอร์เน็ต");
-                      } finally {
-                        setIsSendingLink(false);
-                      }
-                    }} className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-400 dark:text-slate-505 uppercase tracking-wider mb-2">อีเมลผู้ใช้งาน (Use Active Email)</label>
-                        <div className="relative">
-                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-450">
-                            <Mail className="h-4.5 w-4.5" />
-                          </span>
-                          <input
-                            type="email"
-                            required
-                            placeholder="name@example.com"
-                            value={emailInput}
-                            onChange={(e) => setEmailInput(e.target.value)}
-                            className="w-full rounded-2xl pl-10 pr-4 py-3 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white"
+                    <div className="space-y-4">
+                      {/* Google Sign-In Button */}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setLoadingAuth(true);
+                          setAuthError(null);
+                          try {
+                            const user = await signInWithGoogle();
+                            setCurrentUser(user);
+                            setActiveTab("home");
+                            triggerToast("เข้าสู่ระบบด้วย Google สำเร็จเรียบร้อยแล้ว!", "success");
+                          } catch (err: any) {
+                            console.error(err);
+                            setAuthError(err.message || "การเข้าสู่ระบบผ่าน Google ล้มเหลว");
+                          } finally {
+                            setLoadingAuth(false);
+                          }
+                        }}
+                        disabled={loadingAuth}
+                        className="w-full py-3 px-4 rounded-xl bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-900 text-slate-800 dark:text-slate-100 font-extrabold text-xs transition-all flex items-center justify-center gap-2.5 border border-slate-200 dark:border-slate-850 cursor-pointer shadow-sm"
+                      >
+                        <svg className="h-4.5 w-4.5 shrink-0" viewBox="0 0 24 24">
+                          <path
+                            fill="#EA4335"
+                            d="M5.266 9.765A7.077 7.077 0 0 1 12 4.909c1.69 0 3.218.6 4.418 1.582l3.51-3.51C17.755 1.054 15.01 0 12 0c-4.872 0-9.018 2.71-11.132 6.673l4.398 3.092z"
                           />
-                        </div>
+                          <path
+                            fill="#4285F4"
+                            d="M23.49 12.275c0-.825-.075-1.62-.21-2.385H12v4.56h6.435a5.535 5.535 0 0 1-2.4 3.63l3.72 2.88c2.175-2 3.435-4.95 3.435-8.4l-.265-.285z"
+                          />
+                          <path
+                            fill="#FBBC05"
+                            d="M5.266 14.235L.868 17.327A11.94 11.94 0 0 1 0 12c0-1.895.44-3.69 1.256-5.327l4.398 3.092a7.086 7.086 0 0 0-.388 2.235c0 .324.032.64.088.948v1.287z"
+                          />
+                          <path
+                            fill="#34A853"
+                            d="M12 24c3.24 0 5.955-1.08 7.935-2.91l-3.72-2.88c-1.035.7-2.355 1.11-4.215 1.11-3.24 0-5.985-2.19-6.965-5.13L.632 17.28A11.957 11.957 0 0 0 12 24z"
+                          />
+                        </svg>
+                        <span>เข้าสู่ระบบความปลอดภัยสูงด้วย Google (Instant Login)</span>
+                      </button>
+
+                      <div className="flex items-center py-2">
+                        <div className="flex-grow border-t border-slate-100 dark:border-slate-800/80"></div>
+                        <span className="px-3.5 text-[10px] text-slate-400 font-black uppercase tracking-widest leading-none">หรือใช้บริการลิงก์วิเศษ</span>
+                        <div className="flex-grow border-t border-slate-100 dark:border-slate-800/80"></div>
                       </div>
 
-                      <button
-                        type="submit"
-                        disabled={isSendingLink}
-                        className="w-full py-3 px-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-all tracking-wide disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
-                      >
-                        {isSendingLink && (
-                          <div className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        )}
-                        <span>{isSendingLink ? "กำลังส่งลิงก์..." : "ส่งลิงก์เข้าสู่ระบบ (Magic Link)"}</span>
-                      </button>
-                    </form>
+                      <form onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!emailInput.trim()) {
+                          triggerToast("กรุณากรอกอีเมลที่ถูกต้อง", "info");
+                          return;
+                        }
+                        setIsSendingLink(true);
+                        setAuthError(null);
+                        try {
+                          await sendSignInLinkToEmail(emailInput);
+                          setLinkSent(true);
+                          triggerToast("ส่งจดหมายตรวจสอบล็อกอินสำเร็จ! กรุณาเช็กอีเมล", "success");
+                        } catch (err: any) {
+                          console.error(err);
+                          const msg = err.message || "";
+                          if (msg.includes("auth/operation-not-allowed")) {
+                            setAuthError(
+                              "ฟังก์ชันล็อกอินด้วยระบบ Magic Link ล่วงหน้าเข้าสู่ระบบยังไม่ได้ถูกเปิดใช้งานใน Console ของ Firebase ของคุณตามมาตรฐานสิทธิ์ผู้ดูแลระบบ เพื่อแก้ปัญหานี้คุณมีทางเลือกสกัดชั่วคราวง่ายๆ:\n\n1. เข้าสู่ระบบด้วยปุ่ม 'Google (Instant Login)' ทันทีด้านบนเนื่องจากคลาวด์เปิดทำงานให้ปลอดภัยและทันที\n2. หรือเปิดการตั้งค่าของท่านทางคอนโซลหลักที่ Authentication -> Sign-in Method แล้วตั้งค่าเปิดสิทธิ์ใช้งานระบบ 'Email/Password' และตั้งค่าหัวข้อสยบข้อ 'Email Link' เพื่อใช้งานเต็มรูปแบบ\n3. หรือเลือกใช้ทางลัดบัญชีประเมินฉุกเฉิน (Evaluator Bypass) ด้านล่างสุดได้เช่นกันครับ"
+                            );
+                          } else {
+                            setAuthError(msg || "การส่งลิงก์ขัดข้อง โปรดตรวจสอบอินเทอร์เน็ต");
+                          }
+                        } finally {
+                          setIsSendingLink(false);
+                        }
+                      }} className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-400 dark:text-slate-505 uppercase tracking-wider mb-2">อีเมลผู้ใช้งาน (Use Active Email)</label>
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-450">
+                              <Mail className="h-4.5 w-4.5" />
+                            </span>
+                            <input
+                              type="email"
+                              required
+                              placeholder="name@example.com"
+                              value={emailInput}
+                              onChange={(e) => setEmailInput(e.target.value)}
+                              className="w-full rounded-2xl pl-10 pr-4 py-3 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={isSendingLink}
+                          className="w-full py-3 px-4 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-all tracking-wide disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          {isSendingLink && (
+                            <div className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          )}
+                          <span>{isSendingLink ? "กำลังส่งลิงก์..." : "ส่งลิงก์เข้าสู่ระบบ (Magic Link)"}</span>
+                        </button>
+                      </form>
+                    </div>
                   )}
 
                   <div className="border-t border-slate-100 dark:border-slate-800 pt-4 text-center">

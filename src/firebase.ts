@@ -6,6 +6,8 @@ import {
   signInWithEmailLink as fbSignInWithEmailLink,
   signOut as fbSignOut,
   onAuthStateChanged as fbOnAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup,
   type User,
   type ActionCodeSettings
 } from "firebase/auth";
@@ -116,6 +118,61 @@ export const onAuthStateChanged = (callback: AuthCallback) => {
     return () => {
       authListeners.delete(callback);
     };
+  }
+};
+
+export const signInWithGoogle = async (): Promise<StandardUser> => {
+  if (!isMockMode && authInstance) {
+    const provider = new GoogleAuthProvider();
+    // Prefer popup since the SDK allows the current domain easily
+    const result = await signInWithPopup(authInstance, provider);
+    const user = result.user;
+    
+    // Save to Firestore users collection
+    const userData = {
+      userId: user.uid,
+      email: user.email,
+      createdAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString(),
+      sessionInfo: navigator.userAgent
+    };
+    
+    try {
+      await fbSetDoc(fbDoc(dbInstance, "users", user.uid), userData);
+    } catch (e) {
+      console.warn("Failed recording user record to Firestore:", e);
+    }
+
+    return {
+      uid: user.uid,
+      email: user.email,
+    };
+  } else {
+    // Simulator mock login with Google
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const mockEmail = "evaluator.yala@hackathon.org";
+    const users = getLocalUsers();
+    let foundUser = Object.values(users).find(u => u.email?.toLowerCase() === mockEmail.toLowerCase());
+    
+    if (!foundUser) {
+      const uid = "usr-g" + Math.random().toString(36).substr(2, 9);
+      foundUser = {
+        uid,
+        email: mockEmail,
+        createdAt: new Date().toISOString(),
+        lastLoginAt: new Date().toISOString()
+      };
+      users[uid] = foundUser;
+      saveLocalUsers(users);
+    } else {
+      foundUser.lastLoginAt = new Date().toISOString();
+      users[foundUser.uid] = foundUser;
+      saveLocalUsers(users);
+    }
+
+    setLocalCurrentUser(foundUser);
+    authListeners.forEach(cb => cb(foundUser));
+    return foundUser;
   }
 };
 
